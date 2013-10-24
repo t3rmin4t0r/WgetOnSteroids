@@ -25,6 +25,9 @@ import java.security.*;
 
 public class WgetOnSteroids extends Configured implements Tool {
 
+	private static final String CONFIG_PREFIX = WgetOnSteroids.class.getName();
+	private static final String CONFIG_OUTDIR = CONFIG_PREFIX+".outdir";
+	
     public static void main(String[] args) throws Exception {
         Configuration conf = new Configuration();
         int res = ToolRunner.run(conf, new WgetOnSteroids(), args);
@@ -54,6 +57,7 @@ public class WgetOnSteroids extends Configured implements Tool {
         org.apache.commons.cli.Options options = new org.apache.commons.cli.Options();
         options.addOption("u","urls", true, "urls");
         options.addOption("d","dir", true, "dir");
+        options.addOption("n","numrows", true, "numrows");
         CommandLine line = parser.parse(options, remainingArgs);
 
         if(!(line.hasOption("urls") && line.hasOption("dir"))) {
@@ -62,12 +66,19 @@ public class WgetOnSteroids extends Configured implements Tool {
           return 1;
         }
 
+        int n = 1;
+
+        if(line.hasOption("numrows")) {
+          n = Integer.parseInt(line.getOptionValue("numrows"));
+        }
+
         Path in = genInput(line.getOptionValue("urls"));
         Path out = new Path(line.getOptionValue("dir"));
 
         Configuration conf = getConf();
         conf.setInt("mapred.task.timeout",0);
         conf.setInt("mapreduce.task.timeout",0);
+        conf.set(CONFIG_OUTDIR, out.toString());
         Job job = new Job(conf, "WgetOnSteroids");
         job.setJarByClass(getClass());
         job.setNumReduceTasks(0);
@@ -76,7 +87,7 @@ public class WgetOnSteroids extends Configured implements Tool {
         job.setOutputValueClass(Text.class);
 
         job.setInputFormatClass(NLineInputFormat.class);
-        NLineInputFormat.setNumLinesPerSplit(job, 1);
+        NLineInputFormat.setNumLinesPerSplit(job, n);
 
         FileInputFormat.addInputPath(job, in);
         FileOutputFormat.setOutputPath(job, out);
@@ -104,13 +115,12 @@ public class WgetOnSteroids extends Configured implements Tool {
 				if (cmd.length > 1) {
 					dst = cmd[1];
 				}
-				FileOutputCommitter oc = (FileOutputCommitter) context
-						.getOutputCommitter();
-				Path outdir = oc.getWorkPath();
-				Path destfile = new Path(outdir, new Path(dst));
+				String outdir = context.getConfiguration().get(CONFIG_OUTDIR);
+				Path destfile = new Path(String.format("%s/%s", outdir, dst));
 				if(!fs.exists(destfile.getParent())) {
 					fs.mkdirs(destfile.getParent());
 				}
+				System.err.println("Downloading " + src + " into " + destfile);
 				FSDataOutputStream hdfs = fs.create(destfile);
 				InputStream http = src.toURL().openStream();
 				IOUtils.copyLarge(http, hdfs);
